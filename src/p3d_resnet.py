@@ -26,7 +26,7 @@ class P3DResnet(nn.Module):
 
     def __init__(self, input_channels: int, num_classes: int, block_type: str = "sequential",
                  num_blocks_per_stage: tuple[int, ...] = (3, 4, 6, 3), dropout_value: float | None = 0.3,
-                 use_batchnorm: bool = True) -> None:
+                 use_batchnorm: bool = True, base_channels: int = 64) -> None:
         """
         Initialize the Pseudo-3D ResNet-like network.
 
@@ -40,6 +40,8 @@ class P3DResnet(nn.Module):
         architecture. For ResNet-101, use (3, 4, 23, 3). For ResNet-152, use (3, 8, 36, 3).
         :param dropout_value: Dropout value to use after the last fully connected layer. Default is 0.3.
         :param use_batchnorm: Whether to use batch normalization in the network. Default is True.
+        :param base_channels: Base number of channels in the network. As default, the base number of channels is 64 for
+        ResNets. It is possible to scale network up or down "horizontally" by changing this number.
         """
         super().__init__()
 
@@ -51,13 +53,11 @@ class P3DResnet(nn.Module):
 
         self.block_type = block_type
         self.block = self._get_block_generator()
+        self.input_channels = input_channels
         self.use_batchnorm = use_batchnorm
+        self.base_channels = base_channels
 
-        self.stem_block = nn.Sequential(
-            next(self.block)(input_channels, input_channels, 64, kernel_size=7, stride=2, bias=False,
-                             use_batchnorm=self.use_batchnorm),
-            nn.MaxPool3d(kernel_size=3, stride=2)
-        )
+        self.stem_block = self.get_stem_block()
 
         self.stage1 = self.get_stage(num_blocks_per_stage[0], 1)
         self.stage2 = self.get_stage(num_blocks_per_stage[1], 2)
@@ -66,24 +66,23 @@ class P3DResnet(nn.Module):
 
         self.avg_pool = nn.AdaptiveAvgPool3d((2, 2, 2))
         self.dropout = nn.Dropout(dropout_value) if dropout_value is not None else nn.Identity()
-        self.fc = nn.Linear(2 * 2 * 2 * 2048, num_classes)  # 2048 is the number of output channels in stage 4
+        last_conv_layer_dim = self.get_num_channels(4)[2]
+        self.fc = nn.Linear(2 * 2 * 2 * last_conv_layer_dim, num_classes)
 
-    @staticmethod
-    def get_num_channels(stage_number: int) -> tuple[int, int, int]:
+    def get_stem_block(self) -> nn.Sequential:
         """
-        Get the number of input, inside and output channels for a stage of the network.
-        in_channels are the number of channels in the output of the previous stage.
-        inside_channels are the number of channels in the inside convolutional layers of the stage.
-        out_channels are the number of channels in the last convolutional layer of every block in the stage.
+        Get the initial convolutional block (7x7x7) and the pooling layer (3x3x3) of the network.
         """
-        in_channels = (64 * 2 ** stage_number) if stage_number != 1 else 64
-        inside_channels = 64 * 2 ** (stage_number - 1)
-        out_channels = 256 * 2 ** (stage_number - 1)
-        return in_channels, inside_channels, out_channels
+        return nn.Sequential(
+            next(self.block)(self.input_channels, self.base_channels, self.base_channels, kernel_size=7, stride=2,
+                             bias=False, use_batchnorm=self.use_batchnorm),
+            nn.MaxPool3d(kernel_size=3, stride=2)
+        )
 
     def get_stage(self, num_blocks: int, stage_number: int) -> nn.Sequential:
         """
-        Get a stage (stack of convolutional blocks) of the network.
+        Get a stage (stack of convolutional blocks) of the network. The first block in the stage has a stride of 2
+        (bottleneck block), while the rest have a stride of 1 (residual blocks).
 
         :param num_blocks: Number of blocks in the stage.
         :param stage_number: Number of the stage. This number determines the number of input and output
@@ -114,6 +113,19 @@ class P3DResnet(nn.Module):
             return cycle([P3DBlockTypeA, P3DBlockTypeB, P3DBlockTypeC])
         else:
             raise ValueError("Invalid block type.")
+
+    def get_num_channels(self, stage_number: int) -> tuple[int, int, int]:
+        """
+        Get the number of input, inside and output channels for a stage of the network.
+
+        in_channels are the number of channels in the output of the previous stage.
+        inside_channels are the number of channels in the inside convolutional layers of the stage.
+        out_channels are the number of channels in the last convolutional layer of every block in the stage.
+        """
+        in_channels = (self.base_channels * 2 ** stage_number) if stage_number != 1 else self.base_channels
+        inside_channels = self.base_channels * 2 ** (stage_number - 1)
+        out_channels = self.base_channels * 4 * 2 ** (stage_number - 1)
+        return in_channels, inside_channels, out_channels
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

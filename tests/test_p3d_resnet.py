@@ -37,7 +37,6 @@ def test_p3d_resnet_sequential_block_type():
     assert model.stage4[0].__class__.__name__ == 'P3DBlockTypeA'
 
 
-
 def test_p3d_resnet_same_block_type():
     """Test if when block_type='A', only P3DBlockTypeA is used."""
     model = P3DResnet(input_channels=3, num_classes=10, block_type='A', num_blocks_per_stage=(3, 1, 1, 1))
@@ -49,3 +48,16 @@ def test_p3d_resnet_same_block_type():
     assert model.stage3[0].__class__.__name__ == 'P3DBlockTypeA'
     assert model.stage4[0].__class__.__name__ == 'P3DBlockTypeA'
 
+
+def test_p3d_resnet_get_num_channels():
+    """Check if get_num_channels() returns correct number of channels."""
+    model = P3DResnet(input_channels=3, num_classes=10, block_type='A', num_blocks_per_stage=(3, 1, 1, 1))
+    assert model.get_num_channels(1) == (64, 64, 256)
+    assert model.get_num_channels(2) == (256, 128, 512)
+    assert model.get_num_channels(3) == (512, 256, 1024)
+    assert model.get_num_channels(4) == (1024, 512, 2048)
+    model.base_channels = 32
+    assert model.get_num_channels(1) == (32, 32, 128)
+    assert model.get_num_channels(2) == (128, 64, 256)
+    assert model.get_num_channels(3) == (256, 128, 512)
+    assert model.get_num_channels(4) == (512, 256, 1024)
