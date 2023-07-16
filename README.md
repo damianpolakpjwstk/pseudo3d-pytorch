@@ -1,4 +1,4 @@
-# pseudo3d-pytorch
+# pseudo3d_pytorch
 Pseudo-3D CNN networks in PyTorch.
 
 This repository contains my own (unofficial) implementation of Pseudo-3D convolutional networks from the paper "Learning
